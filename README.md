@@ -93,13 +93,4 @@ farm-automation-firmware/
 │   └── farm_nvs.c    NVS storage implementation
 └── README.md
 
----
-
-## 👨‍💻 Author
-
-Manikandan A
-IoT Developer | Tamil Nadu, India
-LinkedIn: www.linkedin.com/in/manikandan-a-65a260274
-**[YOUR FULL NAME]**
-IoT Developer | Tamil Nadu, India
-LinkedIn: linkedin.com/in/yourprofile
+--
