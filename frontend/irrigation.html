@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Irrigation — FarmControl</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="shell">
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="flex-center gap-12">
+        <button class="menu-toggle" id="menuToggle">☰</button>
+        <span class="topbar-title" id="topbarTitle">Irrigation Schedules</span>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="page-header">
+        <div>
+          <h2>Irrigation Schedules</h2>
+          <p>Motor turns ON first → valve opens → irrigation runs → valve closes → motor stops</p>
+        </div>
+        <button class="btn btn-primary" onclick="openAdd()">+ New Schedule</button>
+      </div>
+
+      <div id="alertBox"></div>
+
+      <div id="scheduleList" class="schedule-list">
+        <div class="loading-text">Loading schedules…</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add/Edit Schedule Modal -->
+<div class="modal-overlay" id="schedModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="schedModalTitle">New Irrigation Schedule</h3>
+      <button class="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="schedAlert"></div>
+      <input type="hidden" id="schedId">
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="schedName">Schedule Name *</label>
+          <input type="text" id="schedName" placeholder="e.g. Morning Drip Zone A">
+        </div>
+        <div class="form-group">
+          <label for="schedValve">Valve *</label>
+          <select id="schedValve">
+            <option value="">Select valve…</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- CHANGED: Motor selection now in schedule -->
+      <div class="form-group">
+        <label for="schedMotor">Motor / Pump *</label>
+        <select id="schedMotor">
+          <option value="">Select motor…</option>
+        </select>
+        <div class="input-hint">Motor turns ON before valve opens, stops after valve closes.</div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="schedTime">Start Time *</label>
+          <input type="time" id="schedTime">
+        </div>
+        <div class="form-group">
+          <label for="schedDur">Duration (minutes) *</label>
+          <input type="number" id="schedDur" min="1" max="999" placeholder="30">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Repeat Days *</label>
+        <div class="day-selector" id="daySelectorIrr"></div>
+        <div class="input-hint">Select days this schedule will run each week.</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('schedModal')">Cancel</button>
+      <button class="btn btn-primary" id="saveSchedBtn" onclick="saveSched()">Create Schedule</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/api.js"></script>
+<script src="/js/app.js"></script>
+<script>
+  if (!requireAuth()) throw new Error();
+
+  const farmId = getFarmIdFromUrl();
+  if (!farmId) { window.location.href = '/farms.html'; throw new Error(); }
+
+  let allValves = [];
+  let allMotors = [];
+
+  async function init() {
+    buildSidebar('irrigation');
+    initMobileMenu();
+    initModalClose();
+
+    try {
+      const { farm } = await FarmsAPI.get(farmId);
+      document.getElementById('topbarTitle').textContent = `${farm.name} — Irrigation`;
+    } catch (e) {}
+
+    await Promise.all([loadValves(), loadMotors(), loadSchedules()]);
+  }
+
+  async function loadValves() {
+    try {
+      const { valves } = await ValvesAPI.list(farmId);
+      allValves = valves;
+      const sel = document.getElementById('schedValve');
+      sel.innerHTML = '<option value="">Select valve…</option>';
+      valves.forEach(v => {
+        sel.innerHTML += `<option value="${v.id}">${escHtml(v.name)}</option>`;
+      });
+    } catch (e) {}
+  }
+
+  async function loadMotors() {
+    try {
+      const { motors } = await MotorsAPI.list(farmId);
+      allMotors = motors;
+      const sel = document.getElementById('schedMotor');
+      sel.innerHTML = '<option value="">— No motor —</option>';
+      motors.forEach(m => {
+        sel.innerHTML += `<option value="${m.id}">${escHtml(m.name)} (${escHtml(m.type)})</option>`;
+      });
+    } catch (e) {}
+  }
+
+  async function loadSchedules() {
+    try {
+      const { schedules } = await IrrigationAPI.list(farmId);
+      const container = document.getElementById('scheduleList');
+      const active = schedules.filter(s => s.status !== 'deleted');
+
+      if (!active.length) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">💧</div>
+            <h4>No irrigation schedules yet</h4>
+            <p>Create a schedule to automate irrigation. Motor turns ON first, then valve opens.</p>
+          </div>`;
+        return;
+      }
+
+      const allDays = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+      container.innerHTML = active.map(s => `
+        <div class="schedule-card" id="scard-${s.id}">
+          <div class="schedule-time">${formatTime(s.start_time)}</div>
+          <div class="schedule-info">
+            <div class="schedule-name">${escHtml(s.name)}</div>
+            <div class="schedule-meta">
+              <span class="badge badge-green" style="margin-right:4px">💧 ${escHtml(s.valve_name || '—')}</span>
+              ${s.motor_name ? `<span class="badge badge-amber" style="margin-right:4px">⚙ ${escHtml(s.motor_name)}</span>` : '<span class="badge badge-gray">No motor</span>'}
+              · ${s.duration_min} min
+              <span class="badge ${s.status === 'active' ? 'badge-green' : 'badge-gray'}" style="margin-left:6px">${s.status}</span>
+            </div>
+            <div class="schedule-days">
+              ${allDays.map(d => `<span class="day-pill ${s.days.includes(d) ? '' : 'inactive'}">${d}</span>`).join('')}
+            </div>
+          </div>
+          <div class="flex gap-8" style="flex-shrink:0">
+            ${s.status === 'active'
+              ? `<button class="btn btn-secondary btn-sm" onclick="pauseSchedule(${s.id})">⏸ Pause</button>`
+              : `<button class="btn btn-ghost btn-sm" onclick="resumeSchedule(${s.id})">▶ Resume</button>`}
+            <button class="btn btn-secondary btn-sm" onclick="openEdit(${s.id})">Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteSchedule(${s.id})">✕</button>
+          </div>
+        </div>
+      `).join('');
+    } catch (e) { showAlert('alertBox', e.message); }
+  }
+
+  function openAdd() {
+    document.getElementById('schedId').value    = '';
+    document.getElementById('schedName').value  = '';
+    document.getElementById('schedValve').value = '';
+    document.getElementById('schedMotor').value = '';
+    document.getElementById('schedTime').value  = '';
+    document.getElementById('schedDur').value   = '';
+    document.getElementById('schedModalTitle').textContent = 'New Irrigation Schedule';
+    document.getElementById('saveSchedBtn').textContent    = 'Create Schedule';
+    clearAlert('schedAlert');
+    initDaySelector('daySelectorIrr', []);
+    openModal('schedModal');
+  }
+
+  async function openEdit(id) {
+    try {
+      const { schedules } = await IrrigationAPI.list(farmId);
+      const s = schedules.find(x => x.id === id);
+      if (!s) return;
+      document.getElementById('schedId').value    = id;
+      document.getElementById('schedName').value  = s.name;
+      document.getElementById('schedValve').value = s.valve_id;
+      document.getElementById('schedMotor').value = s.motor_id || '';
+      document.getElementById('schedTime').value  = s.start_time;
+      document.getElementById('schedDur').value   = s.duration_min;
+      document.getElementById('schedModalTitle').textContent = 'Edit Schedule';
+      document.getElementById('saveSchedBtn').textContent    = 'Save Changes';
+      clearAlert('schedAlert');
+      initDaySelector('daySelectorIrr', s.days);
+      openModal('schedModal');
+    } catch (e) { showAlert('alertBox', e.message); }
+  }
+
+  async function saveSched() {
+    const id   = document.getElementById('schedId').value;
+    const days = getSelectedDays('daySelectorIrr');
+    const body = {
+      name:         document.getElementById('schedName').value.trim(),
+      valve_id:     parseInt(document.getElementById('schedValve').value),
+      motor_id:     parseInt(document.getElementById('schedMotor').value) || null,
+      start_time:   document.getElementById('schedTime').value,
+      duration_min: parseInt(document.getElementById('schedDur').value),
+      days,
+    };
+
+    if (!body.name)       return showAlert('schedAlert', 'Schedule name required');
+    if (!body.valve_id)   return showAlert('schedAlert', 'Select a valve');
+    if (!body.start_time) return showAlert('schedAlert', 'Start time required');
+    if (!body.duration_min || body.duration_min < 1)
+      return showAlert('schedAlert', 'Duration must be at least 1 minute');
+    if (!days.length) return showAlert('schedAlert', 'Select at least one day');
+
+    const btn = document.getElementById('saveSchedBtn');
+    btn.disabled = true;
+    try {
+      if (id) await IrrigationAPI.update(farmId, id, body);
+      else    await IrrigationAPI.create(farmId, body);
+      closeModal('schedModal');
+      showAlert('alertBox', 'Schedule saved and sent to device', 'success');
+      await loadSchedules();
+    } catch (e) { showAlert('schedAlert', e.message); }
+    finally { btn.disabled = false; }
+  }
+
+  async function pauseSchedule(id) {
+    try { await IrrigationAPI.update(farmId, id, { status: 'paused' }); await loadSchedules(); }
+    catch (e) { showAlert('alertBox', e.message); }
+  }
+  async function resumeSchedule(id) {
+    try { await IrrigationAPI.update(farmId, id, { status: 'active' }); await loadSchedules(); }
+    catch (e) { showAlert('alertBox', e.message); }
+  }
+  async function deleteSchedule(id) {
+    if (!confirm('Delete this schedule?')) return;
+    try {
+      await IrrigationAPI.delete(farmId, id);
+      showAlert('alertBox', 'Schedule deleted', 'success');
+      await loadSchedules();
+    } catch (e) { showAlert('alertBox', e.message); }
+  }
+
+  init();
+</script>
+</body>
+</html>

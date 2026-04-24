@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard — FarmControl</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="shell">
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="flex-center gap-12">
+        <button class="menu-toggle" id="menuToggle">☰</button>
+        <span class="topbar-title" id="topbarTitle">Dashboard</span>
+      </div>
+      <div class="topbar-actions">
+        <select id="farmSelect" class="btn btn-secondary btn-sm" style="padding:5px 10px;min-width:160px">
+          <option value="">Select a farm…</option>
+        </select>
+      </div>
+    </header>
+
+    <div class="content">
+      <!-- No farm selected -->
+      <div id="noFarmMsg" class="empty-state" style="display:none">
+        <div class="empty-icon">🌿</div>
+        <h4>Select a farm to view dashboard</h4>
+        <p>Choose a farm from the dropdown above, or <a href="/farms.html">go to Farms</a> to get started.</p>
+      </div>
+
+      <!-- Dashboard content -->
+      <div id="dashContent" class="hidden">
+
+        <!-- Stats row -->
+        <div class="stats-grid" id="statsGrid">
+          <div class="stat-card">
+            <div class="stat-icon green">💧</div>
+            <div>
+              <div class="stat-value" id="statIrr">—</div>
+              <div class="stat-label">Irrigation Schedules</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon amber">🧪</div>
+            <div>
+              <div class="stat-value" id="statFert">—</div>
+              <div class="stat-label">Fertigation Schedules</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon blue">🔌</div>
+            <div>
+              <div class="stat-value" id="statDevices">—</div>
+              <div class="stat-label">Devices</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon red">🔔</div>
+            <div>
+              <div class="stat-value" id="statUnread">—</div>
+              <div class="stat-label">Unread Alerts</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sensor readings -->
+        <div class="card mb-24">
+          <div class="card-header">
+            <h3>📊 Live Sensor Readings</h3>
+            <button class="btn btn-secondary btn-sm" onclick="loadSensors()">↻ Refresh</button>
+          </div>
+          <div class="card-body">
+            <div class="sensor-grid" id="sensorGrid">
+              <div class="loading-text">Loading sensors…</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Devices + Notifications side by side -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px" id="bottomGrid">
+
+          <!-- Devices -->
+          <div class="card">
+            <div class="card-header">
+              <h3>🔌 Devices</h3>
+              <a id="setupLink" href="#" class="btn btn-ghost btn-sm">Setup →</a>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Status</th>
+                    <th>Last Seen</th>
+                  </tr>
+                </thead>
+                <tbody id="devicesBody">
+                  <tr><td colspan="3" class="loading-text">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Notifications -->
+          <div class="card">
+            <div class="card-header">
+              <h3>🔔 Recent Notifications</h3>
+              <button class="btn btn-ghost btn-sm" id="markAllReadBtn" onclick="markAllRead()">Mark all read</button>
+            </div>
+            <div class="notif-list" id="notifList">
+              <div class="loading-text">Loading…</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/app.js"></script>
+<script>
+  if (!requireAuth()) throw new Error('Not logged in');
+
+  let currentFarmId = null;
+  let farmDevices   = [];
+
+  // ── Init ────────────────────────────────────────────────────────────────────
+  async function init() {
+    buildSidebar('dashboard');
+    initMobileMenu();
+    await loadFarms();
+
+    const urlFarm = getFarmIdFromUrl();
+    if (urlFarm) {
+      document.getElementById('farmSelect').value = urlFarm;
+      await selectFarm(urlFarm);
+    } else {
+      document.getElementById('noFarmMsg').style.display = '';
+    }
+  }
+
+  // ── Load farm dropdown ───────────────────────────────────────────────────────
+  async function loadFarms() {
+    try {
+      const { farms } = await FarmsAPI.list();
+      const sel = document.getElementById('farmSelect');
+      sel.innerHTML = '<option value="">Select a farm…</option>';
+      farms.forEach(f => {
+        sel.innerHTML += `<option value="${f.id}">${escHtml(f.name)}</option>`;
+      });
+      sel.addEventListener('change', () => {
+        const id = sel.value;
+        if (id) {
+          window.location.href = `/dashboard.html?farm=${id}`;
+        } else {
+          document.getElementById('dashContent').classList.add('hidden');
+          document.getElementById('noFarmMsg').style.display = '';
+        }
+      });
+    } catch (e) { console.error(e); }
+  }
+
+  // ── Select farm and load all data ────────────────────────────────────────────
+  async function selectFarm(farmId) {
+    currentFarmId = farmId;
+    document.getElementById('noFarmMsg').style.display = 'none';
+    document.getElementById('dashContent').classList.remove('hidden');
+    document.getElementById('setupLink').href = `/farm-setup.html?farm=${farmId}`;
+
+    await Promise.all([
+      loadDevices(),
+      loadSensors(),
+      loadNotifications(),
+      loadStats(),
+    ]);
+
+    // Connect MQTT for real-time updates
+    if (farmDevices.length) {
+      connectMqttBrowser(
+        farmDevices.map(d => d.device_uid),
+        handleMqttMessage,
+      );
+    }
+  }
+
+  // ── MQTT real-time handler ───────────────────────────────────────────────────
+  function handleMqttMessage(topic, payload) {
+    const parts = topic.split('/');
+    const msgType = parts[2];
+    if (msgType === 'sensors')  loadSensors();
+    if (msgType === 'notify')   loadNotifications();
+    if (msgType === 'status')   loadDevices();
+  }
+
+  // ── Load stats ───────────────────────────────────────────────────────────────
+  async function loadStats() {
+    try {
+      const [irr, fert, notifs, devs] = await Promise.all([
+        IrrigationAPI.list(currentFarmId),
+        FertigationAPI.list(currentFarmId),
+        NotificationsAPI.list(currentFarmId, { limit: 1 }),
+        DevicesAPI.list(currentFarmId),
+      ]);
+      document.getElementById('statIrr').textContent     = irr.schedules.length;
+      document.getElementById('statFert').textContent    = fert.schedules.length;
+      document.getElementById('statDevices').textContent = devs.devices.length;
+      document.getElementById('statUnread').textContent  = notifs.unread;
+    } catch (e) { console.error(e); }
+  }
+
+  // ── Load devices ─────────────────────────────────────────────────────────────
+  async function loadDevices() {
+    try {
+      const { devices } = await DevicesAPI.list(currentFarmId);
+      farmDevices = devices;
+      const tbody = document.getElementById('devicesBody');
+      if (!devices.length) {
+        tbody.innerHTML = `<tr><td colspan="3"><div class="empty-state" style="padding:20px">
+          <p>No devices added yet. <a href="/farm-setup.html?farm=${currentFarmId}">Add one →</a></p>
+        </div></td></tr>`;
+        return;
+      }
+      tbody.innerHTML = devices.map(d => `
+        <tr>
+          <td>
+            <div class="bold">${escHtml(d.name)}</div>
+            <div class="text-small text-muted">${escHtml(d.device_uid)}</div>
+          </td>
+          <td>
+            <span class="online-dot ${d.is_online ? 'online' : 'offline'}"></span>
+            ${d.is_online ? 'Online' : 'Offline'}
+          </td>
+          <td class="text-small text-muted">${d.last_seen ? timeAgo(d.last_seen) : '—'}</td>
+        </tr>
+      `).join('');
+    } catch (e) { console.error(e); }
+  }
+
+  // ── Load sensors ─────────────────────────────────────────────────────────────
+  async function loadSensors() {
+    try {
+      const { latest } = await SensorsAPI.latest(currentFarmId);
+      const grid = document.getElementById('sensorGrid');
+      if (!latest.length) {
+        grid.innerHTML = `<div class="empty-state" style="padding:20px;grid-column:1/-1">
+          <p>No sensor data received yet. Sensors will appear here once ESP32 sends readings.</p>
+        </div>`;
+        return;
+      }
+      grid.innerHTML = latest.map(s => `
+        <div class="sensor-box">
+          <div class="sensor-val">${s.value}</div>
+          <div class="sensor-unit">${escHtml(s.unit || '')}</div>
+          <div class="sensor-type">${escHtml(s.sensor_type.replace(/_/g,' '))}</div>
+        </div>
+      `).join('');
+    } catch (e) { console.error(e); }
+  }
+
+  // ── Load notifications ───────────────────────────────────────────────────────
+  async function loadNotifications() {
+    try {
+      const { notifications, unread } = await NotificationsAPI.list(currentFarmId, { limit: 12 });
+      document.getElementById('statUnread').textContent = unread;
+      const list = document.getElementById('notifList');
+      if (!notifications.length) {
+        list.innerHTML = `<div class="empty-state" style="padding:24px"><p>No notifications yet.</p></div>`;
+        return;
+      }
+      list.innerHTML = notifications.map(n => `
+        <div class="notif-item ${n.is_read ? '' : 'unread'}">
+          <div class="notif-icon" style="${notifBgClass(n.type)}">${notifTypeIcon(n.type)}</div>
+          <div class="notif-body">
+            <div class="notif-msg">${escHtml(n.message)}</div>
+            <div class="notif-meta">
+              ${n.device_name ? escHtml(n.device_name) + ' · ' : ''}${timeAgo(n.created_at)}
+            </div>
+          </div>
+        </div>
+      `).join('');
+    } catch (e) { console.error(e); }
+  }
+
+  async function markAllRead() {
+    if (!currentFarmId) return;
+    await NotificationsAPI.readAll(currentFarmId);
+    loadNotifications();
+  }
+
+  // ── Responsive bottom grid ───────────────────────────────────────────────────
+  function checkWidth() {
+    const grid = document.getElementById('bottomGrid');
+    if (grid) grid.style.gridTemplateColumns = window.innerWidth < 900 ? '1fr' : '1fr 1fr';
+  }
+  window.addEventListener('resize', checkWidth);
+  checkWidth();
+
+  init();
+</script>
+</body>
+</html>

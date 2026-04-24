@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Farm Setup — FarmControl</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="shell">
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="flex-center gap-12">
+        <button class="menu-toggle" id="menuToggle">☰</button>
+        <span class="topbar-title" id="topbarTitle">Farm Setup</span>
+      </div>
+      <div class="topbar-actions">
+        <a id="pinConfigLink" href="#" class="btn btn-primary btn-sm">📌 Pin Configuration →</a>
+      </div>
+    </header>
+
+    <div class="content">
+      <div id="alertBox"></div>
+
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="devices" data-tab-group="setup">Devices</button>
+        <button class="tab-btn" data-tab="motors" data-tab-group="setup">Motors</button>
+        <button class="tab-btn" data-tab="valves" data-tab-group="setup">Valves</button>
+      </div>
+
+      <!-- ── DEVICES TAB ─────────────────────────────────────────────────── -->
+      <div class="tab-panel active" data-tab="devices" data-tab-group="setup">
+        <div class="page-header">
+          <div>
+            <h2>Devices</h2>
+            <p>ESP32 / controller boards on this farm</p>
+          </div>
+          <button class="btn btn-primary" onclick="openAddDevice()">+ Add Device</button>
+        </div>
+
+        <div class="card">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Name</th><th>Device UID</th><th>Type</th><th>Status</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="devicesBody">
+                <tr><td colspan="5" class="loading-text">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── MOTORS TAB ──────────────────────────────────────────────────── -->
+      <div class="tab-panel" data-tab="motors" data-tab-group="setup">
+        <div class="page-header">
+          <div>
+            <h2>Motors / Pumps</h2>
+            <p>Water pumps and motors connected to this farm</p>
+          </div>
+          <button class="btn btn-primary" onclick="openAddMotor()">+ Add Motor</button>
+        </div>
+
+        <div class="card">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Name</th><th>Type</th><th>Valves</th><th>Notes</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="motorsBody">
+                <tr><td colspan="5" class="loading-text">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── VALVES TAB ──────────────────────────────────────────────────── -->
+      <div class="tab-panel" data-tab="valves" data-tab-group="setup">
+        <div class="page-header">
+          <div>
+            <h2>Valves</h2>
+            <p>Solenoid valves linked to motors</p>
+          </div>
+          <button class="btn btn-primary" onclick="openAddValve()">+ Add Valve</button>
+        </div>
+
+        <div class="card">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Name</th><th>Motor</th><th>Notes</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="valvesBody">
+                <tr><td colspan="4" class="loading-text">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Device Modal -->
+<div class="modal-overlay" id="deviceModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="deviceModalTitle">Add Device</h3>
+      <button class="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="deviceAlert"></div>
+      <input type="hidden" id="deviceId">
+      <div class="form-group">
+        <label for="deviceName">Device Name *</label>
+        <input type="text" id="deviceName" placeholder="e.g. Main Controller">
+      </div>
+      <div class="form-group">
+        <label for="deviceUid">Device UID *</label>
+        <input type="text" id="deviceUid" placeholder="e.g. ESP32-FARM-001">
+        <div class="input-hint">Unique ID flashed into the firmware. Used as MQTT topic prefix.</div>
+      </div>
+      <div class="form-group">
+        <label for="deviceType">Controller Type</label>
+        <select id="deviceType">
+          <option value="esp32">ESP32</option>
+          <option value="custom_pcb">Custom PCB</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="deviceFw">Firmware Version</label>
+        <input type="text" id="deviceFw" placeholder="e.g. 1.0.0">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('deviceModal')">Cancel</button>
+      <button class="btn btn-primary" id="saveDeviceBtn" onclick="saveDevice()">Add Device</button>
+    </div>
+  </div>
+</div>
+
+<!-- Motor Modal -->
+<div class="modal-overlay" id="motorModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="motorModalTitle">Add Motor</h3>
+      <button class="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="motorAlert"></div>
+      <input type="hidden" id="motorId">
+      <div class="form-group">
+        <label for="motorName">Motor Name *</label>
+        <input type="text" id="motorName" placeholder="e.g. Main Water Pump">
+      </div>
+      <div class="form-group">
+        <label for="motorType">Type</label>
+        <select id="motorType">
+          <option value="pump">Water Pump</option>
+          <option value="motor">Motor</option>
+          <option value="submersible">Submersible Pump</option>
+          <option value="booster">Booster Pump</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="motorNotes">Notes</label>
+        <input type="text" id="motorNotes" placeholder="Optional notes">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('motorModal')">Cancel</button>
+      <button class="btn btn-primary" id="saveMotorBtn" onclick="saveMotor()">Add Motor</button>
+    </div>
+  </div>
+</div>
+
+<!-- Valve Modal -->
+<div class="modal-overlay" id="valveModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="valveModalTitle">Add Valve</h3>
+      <button class="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="valveAlert"></div>
+      <input type="hidden" id="valveId">
+      <div class="form-group">
+        <label for="valveName">Valve Name *</label>
+        <input type="text" id="valveName" placeholder="e.g. Zone A - Row 1">
+      </div>
+      <div class="form-group">
+        <label for="valveMotor">Motor / Pump</label>
+        <select id="valveMotor">
+          <option value="">— No motor —</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="valveNotes">Notes</label>
+        <input type="text" id="valveNotes" placeholder="Optional notes">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('valveModal')">Cancel</button>
+      <button class="btn btn-primary" id="saveValveBtn" onclick="saveValve()">Add Valve</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/api.js"></script>
+<script src="/js/app.js"></script>
+<script>
+  if (!requireAuth()) throw new Error();
+  if (!Auth.isTeam()) { window.location.href = '/dashboard.html'; throw new Error(); }
+
+  const farmId = getFarmIdFromUrl();
+  if (!farmId) { window.location.href = '/farms.html'; throw new Error(); }
+
+  let allMotors = [];
+
+  async function init() {
+    buildSidebar('farm-setup');
+    initMobileMenu();
+    initTabs();
+    initModalClose();
+    document.getElementById('pinConfigLink').href = `/pin-config.html?farm=${farmId}`;
+
+    // Load farm name for topbar
+    try {
+      const { farm } = await FarmsAPI.get(farmId);
+      document.getElementById('topbarTitle').textContent = `${farm.name} — Setup`;
+    } catch (e) {}
+
+    await Promise.all([loadDevices(), loadMotors(), loadValves()]);
+  }
+
+  // ── Devices ──────────────────────────────────────────────────────────────────
+  async function loadDevices() {
+    try {
+      const { devices } = await DevicesAPI.list(farmId);
+      const tbody = document.getElementById('devicesBody');
+      if (!devices.length) {
+        tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state" style="padding:20px">
+          <h4>No devices yet</h4><p>Add an ESP32 device to get started.</p></div></td></tr>`;
+        return;
+      }
+      tbody.innerHTML = devices.map(d => `
+        <tr>
+          <td class="bold">${escHtml(d.name)}</td>
+          <td><code style="font-size:0.8rem;background:var(--surface-2);padding:2px 7px;border-radius:4px">${escHtml(d.device_uid)}</code></td>
+          <td><span class="badge badge-blue">${escHtml(d.controller_type)}</span></td>
+          <td>
+            <span class="online-dot ${d.is_online ? 'online' : 'offline'}"></span>
+            ${d.is_online ? 'Online' : 'Offline'}
+          </td>
+          <td>
+            <div class="flex gap-8">
+              <a href="/pin-config.html?farm=${farmId}&device=${d.id}" class="btn btn-ghost btn-sm">Pins</a>
+              <button class="btn btn-secondary btn-sm" onclick="openEditDevice(${d.id},'${escHtml(d.name)}','${escHtml(d.device_uid)}','${escHtml(d.controller_type)}','${escHtml(d.firmware_ver||'')}')">Edit</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteDevice(${d.id})">✕</button>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+    } catch (e) { showAlert('alertBox', e.message); }
+  }
+
+  function openAddDevice() {
+    document.getElementById('deviceId').value = '';
+    document.getElementById('deviceName').value = '';
+    document.getElementById('deviceUid').value = '';
+    document.getElementById('deviceType').value = 'esp32';
+    document.getElementById('deviceFw').value = '';
+    document.getElementById('deviceUid').disabled = false;
+    document.getElementById('deviceModalTitle').textContent = 'Add Device';
+    document.getElementById('saveDeviceBtn').textContent = 'Add Device';
+    clearAlert('deviceAlert');
+    openModal('deviceModal');
+  }
+
+  function openEditDevice(id, name, uid, type, fw) {
+    document.getElementById('deviceId').value = id;
+    document.getElementById('deviceName').value = name;
+    document.getElementById('deviceUid').value = uid;
+    document.getElementById('deviceUid').disabled = true; // UID can't be changed
+    document.getElementById('deviceType').value = type;
+    document.getElementById('deviceFw').value = fw;
+    document.getElementById('deviceModalTitle').textContent = 'Edit Device';
+    document.getElementById('saveDeviceBtn').textContent = 'Save';
+    clearAlert('deviceAlert');
+    openModal('deviceModal');
+  }
+
+  async function saveDevice() {
+    const id = document.getElementById('deviceId').value;
+    const body = {
+      name:            document.getElementById('deviceName').value.trim(),
+      device_uid:      document.getElementById('deviceUid').value.trim(),
+      controller_type: document.getElementById('deviceType').value,
+      firmware_ver:    document.getElementById('deviceFw').value.trim(),
+    };
+    if (!body.name) return showAlert('deviceAlert', 'Device name required');
+    if (!id && !body.device_uid) return showAlert('deviceAlert', 'Device UID required');
+
+    document.getElementById('saveDeviceBtn').disabled = true;
+    try {
+      if (id) await DevicesAPI.update(farmId, id, body);
+      else    await DevicesAPI.create(farmId, body);
+      closeModal('deviceModal');
+      await loadDevices();
+    } catch (e) {
+      showAlert('deviceAlert', e.message);
+    } finally {
+      document.getElementById('saveDeviceBtn').disabled = false;
+    }
+  }
+
+  async function deleteDevice(id) {
+    if (!confirm('Remove this device? This will also delete all pin configurations.')) return;
+    try {
+      await DevicesAPI.delete(farmId, id);
+      await loadDevices();
+    } catch (e) { showAlert('alertBox', e.message); }
+  }
+
+  // ── Motors ───────────────────────────────────────────────────────────────────
+  async function loadMotors() {
+    try {
+      const { motors } = await MotorsAPI.list(farmId);
+      allMotors = motors;
+      const tbody = document.getElementById('motorsBody');
+      if (!motors.length) {
+        tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state" style="padding:20px">
+          <h4>No motors yet</h4><p>Add a pump or motor used on this farm.</p></div></td></tr>`;
+        return;
+      }
+      tbody.innerHTML = motors.map(m => `
+        <tr>
+          <td class="bold">${escHtml(m.name)}</td>
+          <td><span class="badge badge-blue">${escHtml(m.type)}</span></td>
+          <td>${m.valve_count} valve${m.valve_count !== 1 ? 's' : ''}</td>
+          <td class="text-small text-muted">${escHtml(m.notes || '—')}</td>
+          <td>
+            <div class="flex gap-8">
+              <button class="btn btn-secondary btn-sm" onclick="openEditMotor(${m.id},'${escHtml(m.name)}','${escHtml(m.type)}','${escHtml(m.notes||'')}')">Edit</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteMotor(${m.id})">✕</button>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+    } catch (e) { showAlert('alertBox', e.message); }
+  }
+
+  function openAddMotor() {
+    document.getElementById('motorId').value = '';
+    document.getElementById('motorName').value = '';
+    document.getElementById('motorType').value = 'pump';
+    document.getElementById('motorNotes').value = '';
+    document.getElementById('motorModalTitle').textContent = 'Add Motor';
+    document.getElementById('saveMotorBtn').textContent = 'Add Motor';
+    clearAlert('motorAlert');
+    openModal('motorModal');
+  }
+
+  function openEditMotor(id, name, type, notes) {
+    document.getElementById('motorId').value = id;
+    document.getElementById('motorName').value = name;
+    document.getElementById('motorType').value = type;
+    document.getElementById('motorNotes').value = notes;
+    document.getElementById('motorModalTitle').textContent = 'Edit Motor';
+    document.getElementById('saveMotorBtn').textContent = 'Save';
+    clearAlert('motorAlert');
+    openModal('motorModal');
+  }
+
+  async function saveMotor() {
+    const id = document.getElementById('motorId').value;
+    const body = {
+      name:  document.getElementById('motorName').value.trim(),
+      type:  document.getElementById('motorType').value,
+      notes: document.getElementById('motorNotes').value.trim(),
+    };
+    if (!body.name) return showAlert('motorAlert', 'Motor name required');
+    document.getElementById('saveMotorBtn').disabled = true;
+    try {
+      if (id) await MotorsAPI.update(farmId, id, body);
+      else    await MotorsAPI.create(farmId, body);
+      closeModal('motorModal');
+      await loadMotors();
+    } catch (e) {
+      showAlert('motorAlert', e.message);
+    } finally {
+      document.getElementById('saveMotorBtn').disabled = false;
+    }
+  }
+
+  async function deleteMotor(id) {
+    if (!confirm('Delete this motor? Valves linked to it will be unlinked.')) return;
+    try {
+      await MotorsAPI.delete(farmId, id);
+      await Promise.all([loadMotors(), loadValves()]);
+    } catch (e) { showAlert('alertBox', e.message); }
+  }
+
+  // ── Valves ───────────────────────────────────────────────────────────────────
+  async function loadValves() {
+    try {
+      const { valves } = await ValvesAPI.list(farmId);
+      const tbody = document.getElementById('valvesBody');
+      if (!valves.length) {
+        tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state" style="padding:20px">
+          <h4>No valves yet</h4><p>Add solenoid valves for this farm.</p></div></td></tr>`;
+        return;
+      }
+      tbody.innerHTML = valves.map(v => `
+        <tr>
+          <td class="bold">${escHtml(v.name)}</td>
+          <td>${v.motor_name ? `<span class="badge badge-green">${escHtml(v.motor_name)}</span>` : '<span class="text-muted">—</span>'}</td>
+          <td class="text-small text-muted">${escHtml(v.notes || '—')}</td>
+          <td>
+            <div class="flex gap-8">
+              <button class="btn btn-secondary btn-sm" onclick="openEditValve(${v.id},'${escHtml(v.name)}',${v.motor_id||'null'},'${escHtml(v.notes||'')}')">Edit</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteValve(${v.id})">✕</button>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+    } catch (e) { showAlert('alertBox', e.message); }
+  }
+
+  function openAddValve() {
+    document.getElementById('valveId').value = '';
+    document.getElementById('valveName').value = '';
+    document.getElementById('valveNotes').value = '';
+    populateMotorDropdown(null);
+    document.getElementById('valveModalTitle').textContent = 'Add Valve';
+    document.getElementById('saveValveBtn').textContent = 'Add Valve';
+    clearAlert('valveAlert');
+    openModal('valveModal');
+  }
+
+  function openEditValve(id, name, motorId, notes) {
+    document.getElementById('valveId').value = id;
+    document.getElementById('valveName').value = name;
+    document.getElementById('valveNotes').value = notes;
+    populateMotorDropdown(motorId);
+    document.getElementById('valveModalTitle').textContent = 'Edit Valve';
+    document.getElementById('saveValveBtn').textContent = 'Save';
+    clearAlert('valveAlert');
+    openModal('valveModal');
+  }
+
+  function populateMotorDropdown(selectedId) {
+    const sel = document.getElementById('valveMotor');
+    sel.innerHTML = '<option value="">— No motor —</option>';
+    allMotors.forEach(m => {
+      sel.innerHTML += `<option value="${m.id}" ${m.id == selectedId ? 'selected' : ''}>${escHtml(m.name)}</option>`;
+    });
+  }
+
+  async function saveValve() {
+    const id = document.getElementById('valveId').value;
+    const body = {
+      name:     document.getElementById('valveName').value.trim(),
+      motor_id: document.getElementById('valveMotor').value || null,
+      notes:    document.getElementById('valveNotes').value.trim(),
+    };
+    if (!body.name) return showAlert('valveAlert', 'Valve name required');
+    document.getElementById('saveValveBtn').disabled = true;
+    try {
+      if (id) await ValvesAPI.update(farmId, id, body);
+      else    await ValvesAPI.create(farmId, body);
+      closeModal('valveModal');
+      await loadValves();
+    } catch (e) {
+      showAlert('valveAlert', e.message);
+    } finally {
+      document.getElementById('saveValveBtn').disabled = false;
+    }
+  }
+
+  async function deleteValve(id) {
+    if (!confirm('Delete this valve?')) return;
+    try {
+      await ValvesAPI.delete(farmId, id);
+      await loadValves();
+    } catch (e) { showAlert('alertBox', e.message); }
+  }
+
+  init();
+</script>
+</body>
+</html>

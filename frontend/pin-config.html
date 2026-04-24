@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pin Configuration — FarmControl</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .pin-table-wrap table thead th { background: var(--green-dark); color: #fff; }
+    .pin-row select { padding: 5px 8px; font-size: 0.82rem; min-width: 140px; }
+    .pin-row.assigned td { background: var(--green-ghost); }
+    .pin-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--green-pale); color: var(--green-mid);
+      border-radius: var(--radius-pill);
+      padding: 3px 10px; font-size: 0.78rem; font-weight: 600;
+    }
+    .pin-type-badge {
+      font-size: 0.68rem; padding: 1px 7px;
+      border-radius: var(--radius-pill);
+      background: var(--surface-2); color: var(--ink-ghost); font-weight: 600;
+    }
+    .send-badge {
+      display:inline-flex;align-items:center;gap:6px;
+      background:var(--green-pale);color:var(--green-mid);
+      border-radius:var(--radius-pill);padding:4px 12px;font-size:0.8rem;
+    }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="flex-center gap-12">
+        <button class="menu-toggle" id="menuToggle">☰</button>
+        <span class="topbar-title" id="topbarTitle">Pin Configuration</span>
+      </div>
+      <div class="topbar-actions" id="topbarActions">
+        <span class="send-badge" id="mqttBadge" style="display:none">
+          📡 Changes auto-sent to device on save
+        </span>
+      </div>
+    </header>
+
+    <div class="content">
+      <div id="alertBox"></div>
+
+      <!-- Device selector -->
+      <div class="card mb-24">
+        <div class="card-body" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+          <div style="flex:1;min-width:200px">
+            <label style="margin-bottom:4px">Select Device</label>
+            <select id="deviceSelect" onchange="loadDevice(this.value)" style="width:100%">
+              <option value="">— Choose a device —</option>
+            </select>
+          </div>
+          <div id="deviceInfo" style="display:none;flex:1;min-width:180px">
+            <div class="text-small text-muted">Controller type</div>
+            <div class="bold" id="ctrlType">—</div>
+          </div>
+          <div id="pinStats" style="display:none">
+            <div class="text-small text-muted">Pins configured</div>
+            <div class="bold" id="pinCountLabel">0 / 0</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Legend -->
+      <div id="legend" class="flex gap-12 mb-16" style="display:none!important;flex-wrap:wrap">
+        <span style="font-size:0.8rem;color:var(--ink-soft)">Legend:</span>
+        <span class="pin-chip">✓ Assigned</span>
+        <span style="font-size:0.8rem;color:var(--ink-soft);background:var(--surface-2);padding:3px 10px;border-radius:var(--radius-pill)">⬜ Unassigned</span>
+        <span class="badge badge-blue" style="font-size:0.72rem">digital</span>
+        <span class="badge badge-amber" style="font-size:0.72rem">analog_input</span>
+        <span class="badge badge-green" style="font-size:0.72rem">digital_analog</span>
+      </div>
+
+      <!-- Pins table -->
+      <div class="card" id="pinsCard" style="display:none">
+        <div class="card-header">
+          <h3 id="pinsCardTitle">GPIO Pin Assignments</h3>
+          <div class="flex gap-8">
+            <button class="btn btn-secondary btn-sm" onclick="clearAll()">Clear All</button>
+            <button class="btn btn-primary" id="savePinsBtn" onclick="savePins()">
+              💾 Save &amp; Send to Device
+            </button>
+          </div>
+        </div>
+        <div class="table-wrap pin-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:90px">Pin</th>
+                <th style="width:130px">Label</th>
+                <th style="width:100px">Type</th>
+                <th>Assign to Component</th>
+                <th style="width:110px">Pin Mode</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody id="pinsBody"></tbody>
+          </table>
+        </div>
+        <div style="padding:16px 22px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between">
+          <span class="text-small text-muted" id="saveHint">Select a device and assign pins, then click "Save &amp; Send to Device".</span>
+          <button class="btn btn-primary" id="savePinsBtn2" onclick="savePins()">💾 Save &amp; Send to Device</button>
+        </div>
+      </div>
+
+      <!-- Empty state -->
+      <div id="emptyState" class="empty-state">
+        <div class="empty-icon">📌</div>
+        <h4>Select a device to configure pins</h4>
+        <p>Choose a device from the dropdown above to see its available GPIO pins.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/js/api.js"></script>
+<script src="/js/app.js"></script>
+<script>
+  if (!requireAuth()) throw new Error();
+  if (!Auth.isTeam()) { window.location.href = '/dashboard.html'; throw new Error(); }
+
+  const farmId = getFarmIdFromUrl();
+  if (!farmId) { window.location.href = '/farms.html'; throw new Error(); }
+
+  let allComponents = []; // motors + valves
+  let currentDeviceId = null;
+  let currentPins = [];
+
+  async function init() {
+    buildSidebar('pin-config');
+    initMobileMenu();
+
+    try {
+      const { farm } = await FarmsAPI.get(farmId);
+      document.getElementById('topbarTitle').textContent = `${farm.name} — Pin Config`;
+    } catch (e) {}
+
+    await loadComponents();
+    await loadDevices();
+
+    // Auto-select device from URL
+    const urlDevice = new URLSearchParams(window.location.search).get('device');
+    if (urlDevice) {
+      document.getElementById('deviceSelect').value = urlDevice;
+      await loadDevice(urlDevice);
+    }
+  }
+
+  async function loadComponents() {
+    try {
+      const [{ motors }, { valves }] = await Promise.all([
+        MotorsAPI.list(farmId),
+        ValvesAPI.list(farmId),
+      ]);
+      allComponents = [
+        ...motors.map(m => ({ id: m.id, name: m.name, type: 'motor' })),
+        ...valves.map(v => ({ id: v.id, name: v.name, type: 'valve' })),
+      ];
+    } catch (e) { console.error(e); }
+  }
+
+  async function loadDevices() {
+    try {
+      const { devices } = await DevicesAPI.list(farmId);
+      const sel = document.getElementById('deviceSelect');
+      sel.innerHTML = '<option value="">— Choose a device —</option>';
+      devices.forEach(d => {
+        sel.innerHTML += `<option value="${d.id}">${escHtml(d.name)} (${escHtml(d.controller_type)})</option>`;
+      });
+    } catch (e) { showAlert('alertBox', e.message); }
+  }
+
+  async function loadDevice(deviceId) {
+    if (!deviceId) {
+      document.getElementById('pinsCard').style.display  = 'none';
+      document.getElementById('emptyState').style.display = '';
+      document.getElementById('deviceInfo').style.display = 'none';
+      document.getElementById('pinStats').style.display   = 'none';
+      return;
+    }
+
+    currentDeviceId = deviceId;
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('deviceInfo').style.display = '';
+    document.getElementById('pinStats').style.display   = '';
+    document.getElementById('mqttBadge').style.display  = '';
+    document.getElementById('legend').style.display     = 'flex';
+
+    try {
+      const { device, pins } = await PinsAPI.get(farmId, deviceId);
+      currentPins = pins;
+
+      document.getElementById('ctrlType').textContent = device.controller_type.toUpperCase();
+      document.getElementById('pinsCardTitle').textContent =
+        `GPIO Pins — ${device.name} (${device.controller_type.toUpperCase()})`;
+
+      const assigned = pins.filter(p => p.config_id).length;
+      document.getElementById('pinCountLabel').textContent = `${assigned} / ${pins.length}`;
+
+      renderPinsTable(pins);
+      document.getElementById('pinsCard').style.display = '';
+    } catch (e) {
+      showAlert('alertBox', e.message);
+    }
+  }
+
+  function renderPinsTable(pins) {
+    const tbody = document.getElementById('pinsBody');
+
+    const typeBadgeColor = { digital: 'badge-blue', analog_input: 'badge-amber', digital_analog: 'badge-green' };
+
+    tbody.innerHTML = pins.map(p => {
+      const isAssigned = !!p.config_id;
+      const compOptions = allComponents.map(c =>
+        `<option value="${c.type}:${c.id}" ${(p.component_type === c.type && p.component_id === c.id) ? 'selected' : ''}>
+          [${c.type}] ${escHtml(c.name)}
+        </option>`
+      ).join('');
+
+      return `
+        <tr class="pin-row ${isAssigned ? 'assigned' : ''}" id="pinrow-${p.pin_number}">
+          <td>
+            <span class="${isAssigned ? 'pin-chip' : ''}">
+              ${isAssigned ? '✓ ' : ''}GPIO${p.pin_number}
+            </span>
+          </td>
+          <td class="bold text-small">${escHtml(p.pin_label)}</td>
+          <td><span class="pin-type-badge ${typeBadgeColor[p.pin_type] || 'badge-gray'}">${escHtml(p.pin_type)}</span></td>
+          <td>
+            <select onchange="onComponentChange(${p.pin_number}, this.value)"
+              ${p.pin_type === 'analog_input' ? 'title="Input-only pin — cannot drive outputs"' : ''}>
+              <option value="">— Not assigned —</option>
+              ${compOptions}
+            </select>
+          </td>
+          <td>
+            <select id="mode-${p.pin_number}">
+              <option value="output" ${(p.pin_mode||'output') === 'output' ? 'selected' : ''}>Output</option>
+              <option value="input"  ${p.pin_mode === 'input'  ? 'selected' : ''}>Input</option>
+              <option value="pwm"    ${p.pin_mode === 'pwm'    ? 'selected' : ''}>PWM</option>
+            </select>
+          </td>
+          <td class="text-small text-muted">${escHtml(p.pin_notes || '')}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function onComponentChange(pinNum, value) {
+    const row = document.getElementById(`pinrow-${pinNum}`);
+    if (value) {
+      row.classList.add('assigned');
+    } else {
+      row.classList.remove('assigned');
+    }
+    updatePinCount();
+  }
+
+  function updatePinCount() {
+    const assigned = document.querySelectorAll('#pinsBody .pin-row.assigned').length;
+    const total    = document.querySelectorAll('#pinsBody .pin-row').length;
+    document.getElementById('pinCountLabel').textContent = `${assigned} / ${total}`;
+  }
+
+  function clearAll() {
+    if (!confirm('Clear all pin assignments?')) return;
+    document.querySelectorAll('#pinsBody .pin-row').forEach(row => {
+      row.classList.remove('assigned');
+      row.querySelector('select').value = '';
+    });
+    updatePinCount();
+  }
+
+  async function savePins() {
+    const rows = document.querySelectorAll('#pinsBody .pin-row');
+    const pins = [];
+
+    rows.forEach(row => {
+      const pinNum = parseInt(row.id.replace('pinrow-',''));
+      const compSel = row.querySelector('select');
+      const modeSel = document.getElementById(`mode-${pinNum}`);
+      const val = compSel.value;
+      if (!val) return; // skip unassigned
+
+      const [type, id] = val.split(':');
+      pins.push({
+        pin_number:     pinNum,
+        component_type: type,
+        component_id:   parseInt(id),
+        pin_mode:       modeSel?.value || 'output',
+      });
+    });
+
+    const btn = document.getElementById('savePinsBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Saving…';
+    clearAlert('alertBox');
+
+    try {
+      await PinsAPI.save(farmId, currentDeviceId, pins);
+      showAlert('alertBox', `✓ Pin configuration saved and sent to device (${pins.length} pins configured).`, 'success');
+      await loadDevice(currentDeviceId);
+    } catch (e) {
+      showAlert('alertBox', e.message);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '💾 Save &amp; Send to Device';
+    }
+  }
+
+  init();
+</script>
+</body>
+</html>

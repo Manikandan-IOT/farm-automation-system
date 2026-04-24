@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Farms — FarmControl</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="shell">
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="flex-center gap-12">
+        <button class="menu-toggle" id="menuToggle">☰</button>
+        <span class="topbar-title">Farms</span>
+      </div>
+      <div class="topbar-actions" id="topbarActions"></div>
+    </header>
+
+    <div class="content">
+      <div class="page-header">
+        <div>
+          <h2>All Farms</h2>
+          <p>Manage your farms and their devices</p>
+        </div>
+        <div id="addFarmBtn"></div>
+      </div>
+
+      <div id="alertBox"></div>
+
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Farm Name</th>
+                <th>Location</th>
+                <th>Devices</th>
+                <th>Created By</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="farmsBody">
+              <tr><td colspan="5" class="loading-text">Loading farms…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Create/Edit Farm Modal -->
+<div class="modal-overlay" id="farmModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="farmModalTitle">Create Farm</h3>
+      <button class="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="farmModalAlert"></div>
+      <input type="hidden" id="farmId">
+      <div class="form-group">
+        <label for="farmName">Farm Name *</label>
+        <input type="text" id="farmName" placeholder="e.g. North Farm Block A">
+      </div>
+      <div class="form-group">
+        <label for="farmLocation">Location</label>
+        <input type="text" id="farmLocation" placeholder="e.g. Tirunelveli, TN">
+      </div>
+      <div class="form-group">
+        <label for="farmDesc">Description</label>
+        <textarea id="farmDesc" placeholder="Optional notes about this farm…"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('farmModal')">Cancel</button>
+      <button class="btn btn-primary" id="saveFarmBtn" onclick="saveFarm()">Create Farm</button>
+    </div>
+  </div>
+</div>
+
+<!-- Assign User Modal -->
+<div class="modal-overlay" id="assignModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Assign Users to Farm</h3>
+      <button class="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="assignAlert"></div>
+      <input type="hidden" id="assignFarmId">
+      <p class="text-muted text-small mb-16" id="assignFarmName"></p>
+      <div class="form-group">
+        <label for="assignUserId">Select User (Customer)</label>
+        <select id="assignUserId">
+          <option value="">Choose a user…</option>
+        </select>
+      </div>
+      <div class="card mt-16">
+        <div class="card-header"><h3 style="font-size:0.85rem">Currently Assigned</h3></div>
+        <div id="assignedUsersList" style="padding:8px 0"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('assignModal')">Close</button>
+      <button class="btn btn-primary" onclick="assignUser()">Assign User</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/api.js"></script>
+<script src="/js/app.js"></script>
+<script>
+  if (!requireAuth()) throw new Error();
+  const user = Auth.getUser();
+
+  // ── Init ────────────────────────────────────────────────────────────────────
+  async function init() {
+    buildSidebar('farms');
+    initMobileMenu();
+    initModalClose();
+
+    // Only admin can create farms
+    if (Auth.isAdmin()) {
+      document.getElementById('addFarmBtn').innerHTML =
+        `<button class="btn btn-primary" onclick="openCreateFarm()">+ New Farm</button>`;
+    }
+
+    await loadFarms();
+  }
+
+  // ── Load farms table ─────────────────────────────────────────────────────────
+  async function loadFarms() {
+    try {
+      const { farms } = await FarmsAPI.list();
+      const tbody = document.getElementById('farmsBody');
+
+      if (!farms.length) {
+        tbody.innerHTML = `<tr><td colspan="5">
+          <div class="empty-state">
+            <div class="empty-icon">🌿</div>
+            <h4>No farms yet</h4>
+            <p>${Auth.isAdmin() ? 'Click "New Farm" to create your first farm.' : 'No farms assigned to you yet.'}</p>
+          </div>
+        </td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = farms.map(f => `
+        <tr>
+          <td>
+            <div class="bold">${escHtml(f.name)}</div>
+            ${f.description ? `<div class="text-small text-muted">${escHtml(f.description)}</div>` : ''}
+          </td>
+          <td class="text-muted">${escHtml(f.location || '—')}</td>
+          <td>
+            <span class="badge badge-blue">${f.device_count} device${f.device_count !== 1 ? 's' : ''}</span>
+          </td>
+          <td class="text-small text-muted">${escHtml(f.created_by_name || '—')}</td>
+          <td>
+            <div class="flex gap-8">
+              <a href="/dashboard.html?farm=${f.id}" class="btn btn-ghost btn-sm">Dashboard</a>
+              ${Auth.isTeam() ? `
+                <a href="/farm-setup.html?farm=${f.id}" class="btn btn-secondary btn-sm">Setup</a>
+              ` : ''}
+              ${Auth.isAdmin() ? `
+                <button class="btn btn-secondary btn-sm" onclick="openEditFarm(${f.id},'${escHtml(f.name)}','${escHtml(f.location||'')}','${escHtml(f.description||'')}')">Edit</button>
+                <button class="btn btn-secondary btn-sm" onclick="openAssign(${f.id},'${escHtml(f.name)}')">Assign Users</button>
+              ` : ''}
+            </div>
+          </td>
+        </tr>
+      `).join('');
+    } catch (e) {
+      showAlert('alertBox', e.message);
+    }
+  }
+
+  // ── Create farm ──────────────────────────────────────────────────────────────
+  function openCreateFarm() {
+    document.getElementById('farmId').value = '';
+    document.getElementById('farmName').value = '';
+    document.getElementById('farmLocation').value = '';
+    document.getElementById('farmDesc').value = '';
+    document.getElementById('farmModalTitle').textContent = 'Create Farm';
+    document.getElementById('saveFarmBtn').textContent = 'Create Farm';
+    clearAlert('farmModalAlert');
+    openModal('farmModal');
+  }
+
+  function openEditFarm(id, name, location, desc) {
+    document.getElementById('farmId').value = id;
+    document.getElementById('farmName').value = name;
+    document.getElementById('farmLocation').value = location;
+    document.getElementById('farmDesc').value = desc;
+    document.getElementById('farmModalTitle').textContent = 'Edit Farm';
+    document.getElementById('saveFarmBtn').textContent = 'Save Changes';
+    clearAlert('farmModalAlert');
+    openModal('farmModal');
+  }
+
+  async function saveFarm() {
+    const id = document.getElementById('farmId').value;
+    const body = {
+      name:        document.getElementById('farmName').value.trim(),
+      location:    document.getElementById('farmLocation').value.trim(),
+      description: document.getElementById('farmDesc').value.trim(),
+    };
+    if (!body.name) return showAlert('farmModalAlert', 'Farm name is required');
+
+    const btn = document.getElementById('saveFarmBtn');
+    btn.disabled = true;
+    try {
+      if (id) {
+        await FarmsAPI.update(id, body);
+      } else {
+        await FarmsAPI.create(body);
+      }
+      closeModal('farmModal');
+      await loadFarms();
+    } catch (e) {
+      showAlert('farmModalAlert', e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // ── Assign users ─────────────────────────────────────────────────────────────
+  async function openAssign(farmId, farmName) {
+    document.getElementById('assignFarmId').value = farmId;
+    document.getElementById('assignFarmName').textContent = `Farm: ${farmName}`;
+    clearAlert('assignAlert');
+    openModal('assignModal');
+    await loadAssignData(farmId);
+  }
+
+  async function loadAssignData(farmId) {
+    try {
+      const [farmData, usersData] = await Promise.all([
+        FarmsAPI.get(farmId),
+        AuthAPI.getUsers(),
+      ]);
+
+      const assignedIds = new Set(farmData.assigned_users.map(u => u.id));
+      const customers   = usersData.users.filter(u => u.role === 'customer' && u.is_active);
+
+      // Populate dropdown with unassigned customers
+      const sel = document.getElementById('assignUserId');
+      sel.innerHTML = '<option value="">Choose a customer…</option>';
+      customers.filter(u => !assignedIds.has(u.id)).forEach(u => {
+        sel.innerHTML += `<option value="${u.id}">${escHtml(u.name)} (${escHtml(u.email)})</option>`;
+      });
+
+      // Show currently assigned
+      const list = document.getElementById('assignedUsersList');
+      if (!farmData.assigned_users.length) {
+        list.innerHTML = `<p class="text-small text-muted" style="padding:10px 16px">No users assigned yet.</p>`;
+      } else {
+        list.innerHTML = farmData.assigned_users.map(u => `
+          <div class="flex-center gap-12" style="padding:8px 16px;border-bottom:1px solid var(--line)">
+            <span style="flex:1">${escHtml(u.name)} <span class="text-muted text-small">${escHtml(u.email)}</span></span>
+            <span class="badge badge-${u.role === 'admin' ? 'red' : u.role === 'team' ? 'blue' : 'green'}">${u.role}</span>
+            <button class="btn btn-danger btn-sm" onclick="unassignUser(${farmId},${u.id})">Remove</button>
+          </div>
+        `).join('');
+      }
+    } catch (e) {
+      showAlert('assignAlert', e.message);
+    }
+  }
+
+  async function assignUser() {
+    const farmId = document.getElementById('assignFarmId').value;
+    const userId = document.getElementById('assignUserId').value;
+    if (!userId) return showAlert('assignAlert', 'Select a user to assign');
+    try {
+      await FarmsAPI.assignUser(farmId, userId);
+      showAlert('assignAlert', 'User assigned successfully', 'success');
+      await loadAssignData(farmId);
+    } catch (e) { showAlert('assignAlert', e.message); }
+  }
+
+  async function unassignUser(farmId, userId) {
+    if (!confirm('Remove this user from the farm?')) return;
+    try {
+      await FarmsAPI.unassignUser(farmId, userId);
+      await loadAssignData(farmId);
+    } catch (e) { showAlert('assignAlert', e.message); }
+  }
+
+  init();
+</script>
+</body>
+</html>

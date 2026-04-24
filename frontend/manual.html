@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Manual Control — FarmControl</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    /* ── Manual control card ── */
+    .ctrl-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .ctrl-card {
+      background: var(--surface);
+      border: 1.5px solid var(--line);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      transition: border-color 0.2s;
+    }
+    .ctrl-card.on  { border-color: #27ae60; background: #f0fff4; }
+    .ctrl-card.off { border-color: var(--line); }
+
+    /* ── Toggle switch ── */
+    .toggle-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .toggle-switch {
+      position: relative;
+      width: 56px;
+      height: 28px;
+    }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      inset: 0;
+      background: var(--line);
+      border-radius: 28px;
+      transition: 0.3s;
+    }
+    .toggle-slider:before {
+      content: '';
+      position: absolute;
+      width: 20px; height: 20px;
+      left: 4px; top: 4px;
+      background: white;
+      border-radius: 50%;
+      transition: 0.3s;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    }
+    .toggle-switch input:checked + .toggle-slider { background: #27ae60; }
+    .toggle-switch input:checked + .toggle-slider:before { transform: translateX(28px); }
+    .toggle-switch input:disabled + .toggle-slider { opacity: 0.5; cursor: not-allowed; }
+
+    /* Status indicator */
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
+    .status-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-dot.on  { background: #27ae60; box-shadow: 0 0 0 3px rgba(39,174,96,0.2); }
+    .status-dot.off { background: var(--ink-ghost); }
+    .status-dot.pending { background: #f39c12; animation: pulse 1s infinite; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* Component type badge */
+    .comp-type {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: var(--radius-pill);
+    }
+    .comp-valve { background: var(--green-pale); color: var(--green-mid); }
+    .comp-motor { background: var(--amber-pale); color: #b5622a; }
+
+    /* Device section header */
+    .device-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 16px;
+    }
+    .device-header h3 {
+      font-family: var(--font-head);
+      font-size: 1rem;
+      font-weight: 600;
+    }
+    .device-header .uid {
+      font-size: 0.75rem;
+      color: var(--ink-soft);
+      font-family: monospace;
+    }
+    .refresh-btn {
+      margin-left: auto;
+    }
+
+    /* Last updated */
+    .last-updated {
+      font-size: 0.75rem;
+      color: var(--ink-ghost);
+      text-align: right;
+      margin-top: -8px;
+      margin-bottom: 8px;
+    }
+
+    .no-pins {
+      padding: 20px;
+      text-align: center;
+      color: var(--ink-soft);
+      font-size: 0.88rem;
+      border: 1.5px dashed var(--line);
+      border-radius: var(--radius);
+    }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="flex-center gap-12">
+        <button class="menu-toggle" id="menuToggle">☰</button>
+        <span class="topbar-title" id="topbarTitle">Manual Control</span>
+      </div>
+      <div class="topbar-actions">
+        <span id="onlineStatus" class="badge badge-gray">● Checking...</span>
+      </div>
+    </header>
+
+    <div class="content">
+      <div id="alertBox"></div>
+
+      <div class="page-header">
+        <div>
+          <h2>Manual Control</h2>
+          <p>Turn motors and valves ON or OFF manually. Works only when device is online.</p>
+        </div>
+      </div>
+
+      <!-- Farm selector -->
+      <div class="card mb-24" id="farmSelectorCard">
+        <div class="card-body" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+          <div style="flex:1;min-width:200px">
+            <label>Select Farm</label>
+            <select id="farmSelect" onchange="onFarmChange(this.value)" style="width:100%">
+              <option value="">— Select farm —</option>
+            </select>
+          </div>
+          <div style="flex:1;min-width:200px" id="deviceSelectWrap" style="display:none">
+            <label>Select Device</label>
+            <select id="deviceSelect" onchange="onDeviceChange(this.value)" style="width:100%">
+              <option value="">— Select device —</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Control panels per device -->
+      <div id="controlPanels">
+        <div class="empty-state">
+          <div class="empty-icon">🎛️</div>
+          <h4>Select a farm and device</h4>
+          <p>Choose a farm above to see manual controls</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/app.js"></script>
+<script>
+  if (!requireAuth()) throw new Error();
+
+  const farmId    = getFarmIdFromUrl();
+  let currentDeviceUid  = null;
+  let currentDeviceId   = null;
+  let deviceOnline      = false;
+
+  // Track current ON/OFF state of each component
+  // key: "valve_1" or "motor_1"  value: true/false
+  const componentState = {};
+
+  // ── Init ────────────────────────────────────────────────
+  async function init() {
+    buildSidebar('manual');
+    initMobileMenu();
+    await loadFarms();
+
+    if (farmId) {
+      document.getElementById('farmSelect').value = farmId;
+      await onFarmChange(farmId);
+    }
+  }
+
+  // ── Load farms ───────────────────────────────────────────
+  async function loadFarms() {
+    try {
+      const { farms } = await FarmsAPI.list();
+      const sel = document.getElementById('farmSelect');
+      farms.forEach(f => {
+        sel.innerHTML += `<option value="${f.id}">${escHtml(f.name)}</option>`;
+      });
+    } catch (e) { showAlert('alertBox', e.message); }
+  }
+
+  // ── Farm selected ────────────────────────────────────────
+  async function onFarmChange(fid) {
+    if (!fid) return;
+    document.getElementById('deviceSelectWrap').style.display = '';
+
+    try {
+      const { devices } = await DevicesAPI.list(fid);
+      const sel = document.getElementById('deviceSelect');
+      sel.innerHTML = '<option value="">— Select device —</option>';
+      devices.forEach(d => {
+        sel.innerHTML += `<option value="${d.id}" data-uid="${d.device_uid}">${escHtml(d.name)}</option>`;
+      });
+    } catch (e) { showAlert('alertBox', e.message); }
+  }
+
+  // ── Device selected ──────────────────────────────────────
+  async function onDeviceChange(deviceId) {
+    if (!deviceId) return;
+    const sel = document.getElementById('deviceSelect');
+    const opt = sel.querySelector(`option[value="${deviceId}"]`);
+    currentDeviceUid = opt?.dataset.uid;
+    currentDeviceId  = deviceId;
+
+    await loadControlPanel(deviceId, currentDeviceUid);
+
+    // Connect MQTT for real-time status
+    if (currentDeviceUid) {
+      connectMqttBrowser([currentDeviceUid], handleMqttMessage);
+      // Ask ESP32 to send current state
+      await apiFetch(`/farms/${getFarmId()}/motors/status/${currentDeviceUid}`, { method: 'GET' }).catch(() => {});
+    }
+  }
+
+  function getFarmId() {
+    return document.getElementById('farmSelect').value;
+  }
+
+  // ── Load control panel for device ────────────────────────
+  async function loadControlPanel(deviceId, deviceUid) {
+    try {
+      const fid = getFarmId();
+      const [{ device }, { pins }] = await Promise.all([
+        DevicesAPI.get(fid, deviceId),
+        PinsAPI.get(fid, deviceId),
+      ]);
+
+      deviceOnline = device.is_online;
+      updateOnlineStatus(deviceOnline);
+
+      const assignedPins = pins.filter(p => p.config_id);
+
+      if (!assignedPins.length) {
+        document.getElementById('controlPanels').innerHTML = `
+          <div class="no-pins">
+            No pins configured for this device yet.<br>
+            Go to <a href="/pin-config.html?farm=${fid}&device=${deviceId}">Pin Configuration</a> first.
+          </div>`;
+        return;
+      }
+
+      // Get component names
+      const [{ motors }, { valves }] = await Promise.all([
+        MotorsAPI.list(fid),
+        ValvesAPI.list(fid),
+      ]);
+
+      const motorMap = {};
+      motors.forEach(m => motorMap[m.id] = m.name);
+      const valveMap = {};
+      valves.forEach(v => valveMap[v.id] = v.name);
+
+      // Build control cards
+      let html = `
+        <div class="device-header">
+          <span class="online-dot ${deviceOnline ? 'online' : 'offline'}"></span>
+          <h3>${escHtml(device.name)}</h3>
+          <span class="uid">${escHtml(deviceUid)}</span>
+          <button class="btn btn-secondary btn-sm refresh-btn" onclick="refreshStatus()">↻ Refresh Status</button>
+        </div>
+        <div id="lastUpdated" class="last-updated"></div>
+        <div class="ctrl-grid">
+      `;
+
+      // Motors first
+      assignedPins.filter(p => p.component_type === 'motor').forEach(p => {
+        const name = motorMap[p.component_id] || `Motor ${p.component_id}`;
+        const key  = `motor_${p.component_id}`;
+        const isOn = componentState[key] || false;
+        html += buildControlCard('motor', p.component_id, name, p.gpio_num || p.pin_number, isOn, deviceOnline);
+      });
+
+      // Valves
+      assignedPins.filter(p => p.component_type === 'valve').forEach(p => {
+        const name = valveMap[p.component_id] || `Valve ${p.component_id}`;
+        const key  = `valve_${p.component_id}`;
+        const isOn = componentState[key] || false;
+        html += buildControlCard('valve', p.component_id, name, p.gpio_num || p.pin_number, isOn, deviceOnline);
+      });
+
+      html += '</div>';
+      document.getElementById('controlPanels').innerHTML = html;
+
+    } catch (e) {
+      showAlert('alertBox', e.message);
+    }
+  }
+
+  // ── Build one control card ────────────────────────────────
+  function buildControlCard(type, id, name, gpio, isOn, online) {
+    const key     = `${type}_${id}`;
+    const cardCls = isOn ? 'on' : 'off';
+    const dotCls  = isOn ? 'on' : 'off';
+    const statusText = isOn ? 'ON' : 'OFF';
+    const disabled = !online ? 'disabled' : '';
+
+    return `
+      <div class="ctrl-card ${cardCls}" id="card-${key}">
+        <div class="flex-center gap-8">
+          <span class="comp-type comp-${type}">${type}</span>
+          <span class="bold" style="font-size:0.95rem">${escHtml(name)}</span>
+          <span class="text-small text-muted" style="margin-left:auto">GPIO${gpio}</span>
+        </div>
+
+        <div class="toggle-wrap">
+          <div class="status-indicator">
+            <span class="status-dot ${dotCls}" id="dot-${key}"></span>
+            <span id="status-text-${key}">${statusText}</span>
+          </div>
+          <label class="toggle-switch" title="${!online ? 'Device offline' : ''}">
+            <input type="checkbox"
+              id="toggle-${key}"
+              ${isOn ? 'checked' : ''}
+              ${disabled}
+              onchange="onToggle('${type}', ${id}, '${key}', this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        ${!online ? `<div style="font-size:0.75rem;color:var(--red);text-align:center">Device offline — cannot control</div>` : ''}
+      </div>
+    `;
+  }
+
+  // ── Toggle switch changed ─────────────────────────────────
+  async function onToggle(type, id, key, newState) {
+    // Check if device is offline first
+    if (!deviceOnline) {
+        // Revert toggle immediately
+        const toggle = document.getElementById(`toggle-${key}`);
+        toggle.checked = !newState;
+        showAlert('alertBox', 'Device is offline — cannot send command. Please wait for device to reconnect.');
+        return;
+    }
+
+    const toggle = document.getElementById(`toggle-${key}`);
+    const dot    = document.getElementById(`dot-${key}`);
+    const card   = document.getElementById(`card-${key}`);
+    const text   = document.getElementById(`status-text-${key}`);
+
+    // Show pending
+    toggle.disabled  = true;
+    dot.className    = 'status-dot pending';
+    text.textContent = 'Sending...';
+
+    try {
+        await api.post(`/farms/${getFarmId()}/motors/manual`, {
+            device_uid:     currentDeviceUid,
+            component_type: type,
+            component_id:   id,
+            state:          newState,
+        });
+
+        // Update state optimistically
+        componentState[key]  = newState;
+        dot.className        = `status-dot ${newState ? 'on' : 'off'}`;
+        text.textContent     = newState ? 'ON' : 'OFF';
+        card.className       = `ctrl-card ${newState ? 'on' : 'off'}`;
+
+    } catch (e) {
+        // Revert on error
+        toggle.checked      = !newState;
+        componentState[key] = !newState;
+        dot.className       = `status-dot ${!newState ? 'on' : 'off'}`;
+        text.textContent    = !newState ? 'ON' : 'OFF';
+        showAlert('alertBox', e.message);
+    } finally {
+        toggle.disabled = false;
+    }
+  }
+
+     
+
+  // ── MQTT message handler ─────────────────────────────────
+  function handleMqttMessage(topic, payload) {
+    const parts = topic.split('/');
+    const msgType = parts[2];
+
+    if (msgType === 'status') {
+      // Device online/offline
+      deviceOnline = payload.online === true;
+      updateOnlineStatus(deviceOnline);
+      // Enable/disable all toggles
+      document.querySelectorAll('.toggle-switch input').forEach(t => {
+        t.disabled = !deviceOnline;
+      });
+    }
+
+    if (msgType === 'notify') {
+      // STATUS feedback from ESP32
+      // Format: STATUS:valve:1:ON or STATUS:motor:1:OFF
+      const msg = typeof payload === 'string' ? payload : payload.message || '';
+      if (msg.startsWith('STATUS:')) {
+        const parts = msg.split(':');
+        if (parts.length >= 4) {
+          const compType = parts[1]; // valve or motor
+          const compId   = parts[2]; // id
+          const state    = parts[3] === 'ON';
+          const key      = `${compType}_${compId}`;
+
+          componentState[key] = state;
+
+          const toggle = document.getElementById(`toggle-${key}`);
+          const dot    = document.getElementById(`dot-${key}`);
+          const card   = document.getElementById(`card-${key}`);
+          const text   = document.getElementById(`status-text-${key}`);
+
+          if (toggle) toggle.checked   = state;
+          if (dot)    dot.className    = `status-dot ${state ? 'on' : 'off'}`;
+          if (card)   card.className   = `ctrl-card ${state ? 'on' : 'off'}`;
+          if (text)   text.textContent = state ? 'ON' : 'OFF';
+
+          // Show last updated time
+          document.getElementById('lastUpdated').textContent =
+            `Last updated: ${new Date().toLocaleTimeString()}`;
+        }
+      }
+    }
+
+    if (msgType === 'sensors') {
+      // Keep dashboard alive
+    }
+  }
+
+  // ── Online status badge ──────────────────────────────────
+  function updateOnlineStatus(online) {
+    const badge = document.getElementById('onlineStatus');
+    badge.className = `badge ${online ? 'badge-green' : 'badge-red'}`;
+    badge.textContent = online ? '● Online' : '● Offline';
+  }
+
+  // ── Refresh status ───────────────────────────────────────
+  async function refreshStatus() {
+    if (!currentDeviceUid) return;
+    try {
+      await api.get(`/farms/${getFarmId()}/motors/status/${currentDeviceUid}`);
+      showAlert('alertBox', 'Status request sent to device', 'success');
+    } catch (e) {
+      showAlert('alertBox', e.message);
+    }
+  }
+
+  init();
+</script>
+</body>
+</html>

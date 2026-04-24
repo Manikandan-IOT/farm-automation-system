@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Users — FarmControl</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="shell">
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="flex-center gap-12">
+        <button class="menu-toggle" id="menuToggle">☰</button>
+        <span class="topbar-title">User Management</span>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="page-header">
+        <div>
+          <h2>Users</h2>
+          <p>Manage team members and customer accounts</p>
+        </div>
+        <button class="btn btn-primary" onclick="openCreateUser()">+ Add User</button>
+      </div>
+
+      <div id="alertBox"></div>
+
+      <!-- Stats -->
+      <div class="stats-grid mb-24" id="userStats"></div>
+
+      <!-- Filter tabs -->
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="all" data-tab-group="users">All Users</button>
+        <button class="tab-btn" data-tab="admin" data-tab-group="users">Admins</button>
+        <button class="tab-btn" data-tab="team" data-tab-group="users">Team</button>
+        <button class="tab-btn" data-tab="customer" data-tab-group="users">Customers</button>
+      </div>
+
+      <div class="tab-panel active" data-tab="all" data-tab-group="users">
+        <div class="card"><div class="table-wrap"><table>
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+          <tbody id="usersBodyAll"></tbody>
+        </table></div></div>
+      </div>
+
+      <div class="tab-panel" data-tab="admin" data-tab-group="users">
+        <div class="card"><div class="table-wrap"><table>
+          <thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+          <tbody id="usersBodyAdmin"></tbody>
+        </table></div></div>
+      </div>
+
+      <div class="tab-panel" data-tab="team" data-tab-group="users">
+        <div class="card"><div class="table-wrap"><table>
+          <thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+          <tbody id="usersBodyTeam"></tbody>
+        </table></div></div>
+      </div>
+
+      <div class="tab-panel" data-tab="customer" data-tab-group="users">
+        <div class="card"><div class="table-wrap"><table>
+          <thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Farms</th><th>Created</th><th>Actions</th></tr></thead>
+          <tbody id="usersBodyCustomer"></tbody>
+        </table></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Create User Modal -->
+<div class="modal-overlay" id="createUserModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Add New User</h3>
+      <button class="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="createUserAlert"></div>
+      <div class="form-group">
+        <label for="newName">Full Name *</label>
+        <input type="text" id="newName" placeholder="e.g. Ravi Kumar">
+      </div>
+      <div class="form-group">
+        <label for="newEmail">Email Address *</label>
+        <input type="email" id="newEmail" placeholder="ravi@example.com">
+      </div>
+      <div class="form-group">
+        <label for="newPass">Password *</label>
+        <input type="password" id="newPass" placeholder="Minimum 8 characters">
+        <div class="input-hint">User can change this after first login.</div>
+      </div>
+      <div class="form-group">
+        <label for="newRole">Role *</label>
+        <select id="newRole">
+          <option value="customer">Customer (own farm only)</option>
+          <option value="team">Team (all farms)</option>
+          <option value="admin">Admin (full access)</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('createUserModal')">Cancel</button>
+      <button class="btn btn-primary" id="createUserBtn" onclick="createUser()">Create User</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit User Modal -->
+<div class="modal-overlay" id="editUserModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Edit User</h3>
+      <button class="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="editUserAlert"></div>
+      <input type="hidden" id="editUserId">
+      <div class="form-group">
+        <label for="editName">Full Name</label>
+        <input type="text" id="editName">
+      </div>
+      <div class="form-group">
+        <label for="editRole">Role</label>
+        <select id="editRole">
+          <option value="customer">Customer</option>
+          <option value="team">Team</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="editActive">Account Status</label>
+        <select id="editActive">
+          <option value="1">Active</option>
+          <option value="0">Deactivated</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('editUserModal')">Cancel</button>
+      <button class="btn btn-primary" id="editUserBtn" onclick="updateUser()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/api.js"></script>
+<script src="/js/app.js"></script>
+<script>
+  if (!requireAuth()) throw new Error();
+  if (!Auth.isAdmin()) { window.location.href = '/dashboard.html'; throw new Error(); }
+
+  let allUsers = [];
+
+  async function init() {
+    buildSidebar('users');
+    initMobileMenu();
+    initTabs();
+    initModalClose();
+    await loadUsers();
+  }
+
+  async function loadUsers() {
+    try {
+      const { users } = await AuthAPI.getUsers();
+      allUsers = users;
+
+      // Stats
+      const counts = { admin: 0, team: 0, customer: 0, inactive: 0 };
+      users.forEach(u => {
+        counts[u.role] = (counts[u.role] || 0) + 1;
+        if (!u.is_active) counts.inactive++;
+      });
+      document.getElementById('userStats').innerHTML = `
+        <div class="stat-card"><div class="stat-icon red">👑</div><div>
+          <div class="stat-value">${counts.admin}</div><div class="stat-label">Admins</div></div></div>
+        <div class="stat-card"><div class="stat-icon blue">👷</div><div>
+          <div class="stat-value">${counts.team}</div><div class="stat-label">Team</div></div></div>
+        <div class="stat-card"><div class="stat-icon green">🌾</div><div>
+          <div class="stat-value">${counts.customer}</div><div class="stat-label">Customers</div></div></div>
+        <div class="stat-card"><div class="stat-icon amber">⚠</div><div>
+          <div class="stat-value">${counts.inactive}</div><div class="stat-label">Inactive</div></div></div>
+      `;
+
+      renderTable('usersBodyAll',      users);
+      renderTable('usersBodyAdmin',    users.filter(u => u.role === 'admin'));
+      renderTable('usersBodyTeam',     users.filter(u => u.role === 'team'));
+      renderTable('usersBodyCustomer', users.filter(u => u.role === 'customer'), true);
+    } catch (e) {
+      showAlert('alertBox', e.message);
+    }
+  }
+
+  function renderTable(tbodyId, users, showFarmsLink = false) {
+    const tbody = document.getElementById(tbodyId);
+    if (!users.length) {
+      tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state" style="padding:20px"><p>No users in this category.</p></div></td></tr>`;
+      return;
+    }
+    const myId = Auth.getUser().id;
+    tbody.innerHTML = users.map(u => `
+      <tr style="${!u.is_active ? 'opacity:0.5' : ''}">
+        <td>
+          <div class="bold">${escHtml(u.name)}</div>
+          ${u.id === myId ? '<span class="badge badge-blue" style="font-size:0.68rem">You</span>' : ''}
+        </td>
+        <td class="text-small">${escHtml(u.email)}</td>
+        ${tbodyId === 'usersBodyAll' ? `<td><span class="badge badge-${u.role==='admin'?'red':u.role==='team'?'blue':'green'}">${u.role}</span></td>` : ''}
+        <td>
+          <span class="badge ${u.is_active ? 'badge-green' : 'badge-gray'}">
+            ${u.is_active ? 'Active' : 'Inactive'}
+          </span>
+        </td>
+        ${showFarmsLink ? `<td><a href="/farms.html" class="text-small" style="color:var(--green)">Manage →</a></td>` : ''}
+        <td class="text-small text-muted">${u.created_at ? u.created_at.split('T')[0] : '—'}</td>
+        <td>
+          ${u.id !== myId ? `
+            <div class="flex gap-8">
+              <button class="btn btn-secondary btn-sm" onclick="openEdit(${u.id})">Edit</button>
+              <button class="btn btn-danger btn-sm" onclick="deactivateUser(${u.id})">${u.is_active ? 'Deactivate' : 'Deleted'}</button>
+            </div>
+          ` : '—'}
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  function openCreateUser() {
+    ['newName','newEmail','newPass'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('newRole').value = 'customer';
+    clearAlert('createUserAlert');
+    openModal('createUserModal');
+  }
+
+  async function createUser() {
+    const body = {
+      name:     document.getElementById('newName').value.trim(),
+      email:    document.getElementById('newEmail').value.trim(),
+      password: document.getElementById('newPass').value,
+      role:     document.getElementById('newRole').value,
+    };
+    if (!body.name)     return showAlert('createUserAlert', 'Name required');
+    if (!body.email)    return showAlert('createUserAlert', 'Email required');
+    if (!body.password || body.password.length < 8)
+      return showAlert('createUserAlert', 'Password must be at least 8 characters');
+
+    const btn = document.getElementById('createUserBtn');
+    btn.disabled = true;
+    try {
+      await AuthAPI.createUser(body);
+      closeModal('createUserModal');
+      showAlert('alertBox', `User "${body.name}" created successfully`, 'success');
+      await loadUsers();
+    } catch (e) {
+      showAlert('createUserAlert', e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function openEdit(id) {
+    const u = allUsers.find(x => x.id === id);
+    if (!u) return;
+    document.getElementById('editUserId').value = id;
+    document.getElementById('editName').value   = u.name;
+    document.getElementById('editRole').value   = u.role;
+    document.getElementById('editActive').value = u.is_active ? '1' : '0';
+    clearAlert('editUserAlert');
+    openModal('editUserModal');
+  }
+
+  async function updateUser() {
+    const id = document.getElementById('editUserId').value;
+    const body = {
+      name:      document.getElementById('editName').value.trim(),
+      role:      document.getElementById('editRole').value,
+      is_active: document.getElementById('editActive').value === '1',
+    };
+    const btn = document.getElementById('editUserBtn');
+    btn.disabled = true;
+    try {
+      await AuthAPI.updateUser(id, body);
+      closeModal('editUserModal');
+      showAlert('alertBox', 'User updated', 'success');
+      await loadUsers();
+    } catch (e) {
+      showAlert('editUserAlert', e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function deactivateUser(id) {
+    const u = allUsers.find(x => x.id === id);
+    if (!confirm(`Deactivate "${u?.name}"? They will not be able to login.`)) return;
+    try {
+      await AuthAPI.deleteUser(id);
+      showAlert('alertBox', 'User deactivated', 'success');
+      await loadUsers();
+    } catch (e) { showAlert('alertBox', e.message); }
+  }
+
+  init();
+</script>
+</body>
+</html>
